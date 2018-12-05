@@ -1,0 +1,214 @@
+Разработчика попросили получить данные от стороннего сервиса.
+Данные необходимо кешировать. Ошибки необходимо логировать.
+Он с задачей справился, ниже предоставлен его код.
+
+Задание: Проведите Code Review. Необходимо написать, с чем вы не согласны и почему.
+
+Дополнительное задание: Напишите свой вариант. 
+Решение должно быть представлено в виде ссылки на https://github.com/.
+
+<?php
+
+namespace src\Integration;
+
+class DataProvider
+{
+    private $host;
+    private $user;
+    private $password;
+
+    /**
+     * @param $host
+     * @param $user
+     * @param $password
+     */
+    public function __construct($host, $user, $password)
+    {
+        $this->host = $host;
+        $this->user = $user;
+        $this->password = $password;
+    }
+    
+    /**
+     * @param array $request
+     *
+     * @return array
+     */
+    public function get(array $request)
+    {
+        // returns a response from external service
+    }
+}
+<?php
+
+namespace src\Decorator;
+
+use DateTime;
+use Exception;
+use Psr\Cache\CacheItemPoolInterface;
+use Psr\Log\LoggerInterface;
+use src\Integration\DataProvider;
+
+class DecoratorManager extends DataProvider
+{
+    public $cache;
+    public $logger;
+
+    /**
+     * @param string $host
+     * @param string $user
+     * @param string $password
+     * @param CacheItemPoolInterface $cache
+     */
+    public function __construct($host, $user, $password, CacheItemPoolInterface $cache)
+    {
+        parent::__construct($host, $user, $password);
+        $this->cache = $cache;
+    }
+
+    public function setLogger(LoggerInterface $logger)
+    {
+        $this->logger = $logger;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getResponse(array $input)
+    {
+        try {
+            $cacheKey = $this->getCacheKey($input);
+            $cacheItem = $this->cache->getItem($cacheKey);
+            if ($cacheItem->isHit()) {
+                return $cacheItem->get();
+            }
+
+            $result = parent::get($input);
+
+            $cacheItem
+                ->set($result)
+                ->expiresAt(
+                    (new DateTime())->modify('+1 day')
+                );
+
+            return $result;
+        } catch (Exception $e) {
+            $this->logger->critical('Error');
+        }
+
+        return [];
+    }
+
+    public function getCacheKey(array $input)
+    {
+        return json_encode($input);
+    }
+}
+
+1. Свойства cache и logger в DecoratorManager нужно сделать protected т.к. они присваиваются через конструктор и сет метод
+2. Свойства cache и logger нужно оба передавать через конструктор либо для обоих сделать set методы, для обеспечения единобразия работы с классом
+3. Не понятно для DecoratorManager наследуется от DataProvider, в итоге DecoratorManager имеет 2 метода для получения данных
+get() и getResponse() что приводит к недопониманию какой метод использовать для получения данных,
+необходимо отменить наследование, а экземпляр DataProvider передавать в конструктор DecoratorManager, тем самым сохранив функциональность
+DataProvider и получить возможноть кеширования и логирования в DecoratorManager
+
+Мой вариант
+
+namespace src\Integration;
+
+interface DataProviderInterface {
+	public function get(array $request);
+}
+
+class DataProvider implements DataProviderInterface
+{
+	private $host;
+	private $user;
+	private $password;
+
+	/**
+	 * @param $host
+	 * @param $user
+	 * @param $password
+	 */
+	public function __construct($host, $user, $password)
+	{
+		$this->host = $host;
+		$this->user = $user;
+		$this->password = $password;
+	}
+
+	/**
+	 * @param array $request
+	 *
+	 * @return array
+	 */
+	public function get(array $request)
+	{
+		// returns a response from external service
+	}
+}
+
+namespace src\Decorator;
+
+use DateTime;
+use Exception;
+use Psr\Cache\CacheItemPoolInterface;
+use Psr\Log\LoggerInterface;
+use src\Integration\DataProviderInterface;
+
+class DecoratorManager
+{
+	protected $dataProvider;
+
+	protected $cache;
+
+	protected $logger;
+
+	/**
+	 * DecoratorManager constructor.
+	 *
+	 * @param DataProviderInterface  $dataProvider
+	 * @param CacheItemPoolInterface $cache
+	 * @param LoggerInterface        $logger
+	 */
+	public function __construct(DataProviderInterface $dataProvider, CacheItemPoolInterface $cache, LoggerInterface $logger)
+	{
+		$this->dataProvider = $dataProvider;
+		$this->cache = $cache;
+		$this->logger = $logger;
+	}
+
+	/**
+	 * {@inheritdoc}
+	 */
+	public function getResponse(array $input)
+	{
+		try {
+			$cacheKey = $this->getCacheKey($input);
+			$cacheItem = $this->cache->getItem($cacheKey);
+			if ($cacheItem->isHit()) {
+				return $cacheItem->get();
+			}
+
+			$result = $this->dataProvider->get($input);
+
+			$cacheItem
+				->set($result)
+				->expiresAt(
+					(new DateTime())->modify('+1 day')
+				);
+
+			return $result;
+		} catch (Exception $e) {
+			$this->logger->critical('Error');
+		}
+
+		return [];
+	}
+
+	public function getCacheKey(array $input)
+	{
+		return json_encode($input);
+	}
+}

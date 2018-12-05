@@ -1,0 +1,34 @@
+﻿/**
+ * Функция сложения столбиком
+ * 
+ * @param $number1
+ * @param $number2
+ *
+ * @return string
+ */
+function sum($number1, $number2) {
+	$number1Len = strlen($number1);
+	$number2Len = strlen($number2);
+
+	$count = $number1Len > $number2Len ? $number1Len : $number2Len;
+
+	$number1Reverse = strrev($number1);
+	$number2Reverse = strrev($number2);
+
+	$sum = null;
+	$residue = 0;
+
+	for ($i = 0; $i < $count; $i++) {
+		$result = $number1Reverse[$i] + $number2Reverse[$i] + $residue;
+
+		if ($result > 9) {
+			$sum .=  $result - 10;
+			$residue = 1;
+		} else {
+			$sum .=  $result;
+			$residue = 0;
+		}
+	}
+
+	return strrev($sum);
+}
